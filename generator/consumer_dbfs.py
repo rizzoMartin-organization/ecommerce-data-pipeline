@@ -1,7 +1,6 @@
 from kafka import KafkaConsumer
 import json
 import requests
-import base64
 from dotenv import load_dotenv
 import os
 import uuid
@@ -47,8 +46,6 @@ def write_to_dbfs(data, path):
             },
         data=content
     )
-    print(f"Status: {response.status_code}")
-    print(f"Response: {response.text}")
     return response.status_code
 
 
@@ -59,5 +56,5 @@ for message in consumer:
     if len(batches[topic_name]) >= BATCH_SIZE:
         path = f"/Volumes/ecommerce/bronze/streaming_files/{topic_name}/batch_{uuid.uuid4()}.json"
         status = write_to_dbfs(data=batches[topic_name], path=path)
-        print(f"Lote escrito en {path} - status {status}")
+        print(f"Batch written to {path} - status {status}")
         batches[topic_name] = []
