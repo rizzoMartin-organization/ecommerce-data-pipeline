@@ -2,3 +2,4 @@ venv/
 .env
 generator/consumer_test.py
 data/
+.venv/
