@@ -4,6 +4,10 @@ import random
 import uuid
 import os
 
+SEED = 42
+Faker.seed(SEED)
+random.seed(SEED)
+
 fake = Faker()
 
 os.makedirs("data", exist_ok=True)
