@@ -54,6 +54,7 @@ def generate_inventory_update():
         stock_change = random.choice([-1, -2, -3, 1, 2, 3])
 
     return {
+        "update_id": str(uuid.uuid4()),
         "product_id": random.randint(1, 500),
         "stock_change": stock_change,
         "timestamp": datetime.now(timezone.utc).isoformat(),
