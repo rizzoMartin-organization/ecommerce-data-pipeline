@@ -30,7 +30,7 @@ consumer = KafkaConsumer(
 def write_to_dbfs(data, path):
     batch = {
         "messages": data,
-        "ingestion_timestamp": datetime.now(timezone.utc).isoformat(),
+        "kafka_batch_timestamp": datetime.now(timezone.utc).isoformat(),
         "message_count": len(data),
     }
     content = json.dumps(batch).encode("utf-8")
