@@ -3,3 +3,5 @@ venv/
 generator/consumer_test.py
 data/
 .venv/
+CLAUDE.md
+ROADMAP.md
