@@ -132,7 +132,8 @@ ecommerce-data-pipeline/
 │   └── consumer_dbfs.py        # Kafka → Volumes (streaming_files/), batches of 10
 ├── notebooks/
 │   ├── 01_streaming_bronze.py  # Auto Loader → bronze *_stream tables
-│   └── 02_batch_bronze.py      # Batch read → bronze reference tables
+│   ├── 02_batch_bronze.py      # Batch read → bronze reference tables
+│   └── 03_silver.py            # Explode, type, dedupe, MERGE INTO → silver tables
 ├── docker-compose.yml          # Local Kafka broker
 ├── requirements.txt
 └── README.md
@@ -157,11 +158,30 @@ Every Bronze table carries `ingestion_timestamp` and `ingestion_date`, regardles
 arrived through. Streaming tables additionally carry `kafka_batch_timestamp` — the moment the
 consumer closed the batch — which makes end-to-end latency measurable.
 
-### Silver — planned
+### Silver — implemented
 
-Explode the batched envelopes into one row per event, apply explicit typing, deduplicate by
-natural key (consumer restarts do produce duplicates), and switch from blind appends to
-`MERGE INTO`. `users` gets SCD Type 2 treatment so customer attribute changes stay auditable.
+| Table | Built from | Key |
+|-------|-----------|-----|
+| `ecommerce.silver.orders` | `orders_stream` (exploded) + `orders_history`, unified | `order_id` |
+| `ecommerce.silver.navigation_events` | `navigation_events_stream` (exploded) | `event_id` |
+| `ecommerce.silver.inventory_updates` | `inventory_updates_stream` (exploded) | `update_id` |
+| `ecommerce.silver.users` | `bronze.users` | `user_id` |
+| `ecommerce.silver.products` | `bronze.products` | `product_id` |
+
+`orders` merges two Bronze sources that describe the same entity through different paths — the
+live stream and the historical batch load — into one table, adding a `source` column
+(`'stream'` / `'history'`) so the origin stays traceable. The other three are explode → type →
+`dropDuplicates` by natural key → `MERGE INTO`, batch-read from the whole Bronze table each run
+rather than incrementally. Because the merge key is the natural key, re-running the notebook is
+idempotent — matched rows are just rewritten with the same values, nothing duplicates — so no
+checkpoint is needed at this stage. `users` and `products` are MERGEd too, even without an
+explode step, so the same upsert plumbing is already in place for when SCD Type 2 replaces it.
+
+SCD Type 2 on `users` is deferred: `batch_generator.py` originally reseeded Faker on every run, so
+re-running it reassigned every user's name/email/country at random — SCD2 over that would show
+"all 1000 users changed everything" instead of a real, sparse change history. Fixed by seeding
+`Faker`/`random` so reference data is reproducible across runs; SCD2 itself waits for a mechanism
+that introduces a few controlled, realistic changes between generations.
 
 ### Gold — planned
 
@@ -243,6 +263,11 @@ Import `notebooks/` into the Databricks workspace and run both. `01_streaming_br
 rather than running forever. `02_batch_bronze.py` is a plain batch job that rebuilds the three
 reference tables from scratch on every run.
 
+### 8. Run the Silver notebook
+
+Run `03_silver.py` after both Bronze notebooks have populated their tables at least once — it
+reads from `ecommerce.bronze.*`, so there's nothing to explode or merge before that.
+
 ---
 
 ## Key technical decisions
@@ -272,6 +297,13 @@ which the Bronze notebook then overwrote with `withColumn("ingestion_timestamp",
 current_timestamp())` — silently destroying the producer-side value. Renaming the envelope field
 to `kafka_batch_timestamp` keeps both moments distinct and preserves the latency measurement.
 
+**Why merge `orders_stream` and `orders_history` into one Silver table instead of two?**
+They describe the same entity — a placed order — through two different ingestion paths. Keeping
+them apart would mean every downstream query that wants "all orders" has to union them itself.
+Silver normalises the one real difference (`orders_history.order_date` has no time-of-day,
+`orders_stream.timestamp` does) into a single `order_timestamp`, and keeps a `source` column so
+the origin is never actually lost, just no longer something callers have to handle by hand.
+
 ---
 
 ## Free Edition constraints
@@ -297,7 +329,8 @@ planned:
 - ✅ Auto Loader and incremental file ingestion
 - ✅ Structured Streaming with `availableNow` triggers
 - ✅ Delta Lake writes, schema evolution (`mergeSchema` / `overwriteSchema`)
-- 🚧 `MERGE INTO`, deduplication, SCD Type 2
+- ✅ `MERGE INTO`, deduplication
+- 🚧 SCD Type 2
 - 🚧 Change Data Feed
 - 🚧 Multi-task Jobs and scheduling
 - 🚧 Declarative pipelines with data-quality expectations
@@ -308,7 +341,8 @@ planned:
 ## Roadmap
 
 - [x] Bronze layer — streaming and batch ingestion
-- [ ] Silver layer — explode, typing, deduplication, `MERGE INTO`, SCD Type 2
+- [x] Silver layer — explode, typing, deduplication, `MERGE INTO`
+- [ ] SCD Type 2 on `users`
 - [ ] Gold layer — the four analytical tables
 - [ ] Orchestration with Databricks Jobs
 - [ ] Rebuild as a declarative pipeline with expectations
